@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gorilla/websocket"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -87,6 +88,8 @@ type Client struct {
 
 	ForceSyncOnReconnect bool
 	CacheClearCutoff     time.Duration
+	PollFallback         bool
+	DisableTrouter       bool
 	UserAgent            string
 	Timeout              int
 
@@ -95,13 +98,23 @@ type Client struct {
 	loginCancel context.CancelFunc
 	wg          sync.WaitGroup
 
-	connected atomic.Bool
+	connected      atomic.Bool
+	wsConnected    atomic.Bool
+	lastWsActivity atomic.Int64
 
 	// Lock ordering: reauthMu -> authMu. Never hold authMu or Client.RWMutex across I/O.
 	reauthMu    sync.Mutex
 	authMu      sync.RWMutex
 	tokenState  TokenState
 	scopeTokens map[string]accessTokenEntry
+
+	// wsReconnectMu serializes Trouter reconnects; wsMu guards wsConn and endpoint metadata.
+	wsReconnectMu sync.Mutex
+	wsMu          sync.RWMutex
+	wsWriteMu     sync.Mutex
+	wsConn        *websocket.Conn
+	trouterEPID   string
+	trouterSURL   string
 
 	httpClient *http.Client
 
@@ -200,6 +213,17 @@ func (c *Client) Connected() bool {
 	return c.connected.Load()
 }
 
+// WsConnected reports whether the real-time Trouter WebSocket is currently open.
+func (c *Client) WsConnected() bool {
+	return c.wsConnected.Load()
+}
+
+// Reconnect closes the active Trouter WebSocket so the supervisor immediately
+// establishes a fresh session.
+func (c *Client) Reconnect() {
+	c.closeActiveWS()
+}
+
 // Me returns a copy of the currently authenticated user profile, or nil before login.
 func (c *Client) Me() *User {
 	c.RLock()
@@ -260,6 +284,10 @@ func (c *Client) Login(ctx context.Context) error {
 
 	c.connected.Store(true)
 
+	if !c.DisableTrouter {
+		c.startTrouter(loginCtx)
+	}
+
 	return nil
 }
 
@@ -276,6 +304,7 @@ func (c *Client) Logout(_ context.Context) error {
 		cancel()
 	}
 
+	c.closeActiveWS()
 	c.wg.Wait()
 
 	return nil
