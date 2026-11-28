@@ -178,10 +178,44 @@ func (c *Client) UpdateChannels(ctx context.Context) error {
 	c.Users.mu.Unlock()
 
 	c.hydrateCSALastPost(ctx, needLastPost)
+	c.logChannelsSummary()
 
 	c.logger.Debugf("Synced %d conversations (%d teams, %d CSA channels)", len(convs), len(teams), len(csaChans))
 
 	return nil
+}
+
+func (c *Client) logChannelsSummary() {
+	c.Users.mu.RLock()
+
+	var joinedChannels, directMessages int
+
+	for id := range c.Users.joinedChannels {
+		ch, ok := c.Users.conversations[id]
+		if !ok {
+			continue
+		}
+
+		switch ch.Type {
+		case ConversationDM, ConversationGroup, ConversationSelfNote:
+			directMessages++
+		default:
+			joinedChannels++
+		}
+	}
+
+	userCount := len(c.Users.users)
+
+	c.Users.mu.RUnlock()
+
+	if c.initialSyncLogged.CompareAndSwap(false, true) {
+		c.logger.Infof("found %d channels for user (%d channels, %d DMs/GMs)",
+			joinedChannels+directMessages, joinedChannels, directMessages)
+		c.logger.Infof("found %d users", userCount)
+	} else {
+		c.logger.Debugf("found %d channels for user (%d channels, %d DMs/GMs)",
+			joinedChannels+directMessages, joinedChannels, directMessages)
+	}
 }
 
 func (c *Client) preserveCachedMembersLocked(id string, ch *Conversation) {

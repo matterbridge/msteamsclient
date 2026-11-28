@@ -16,7 +16,6 @@
 - Never introduce speculative flexibility, broad refactoring, or unrelated cleanups.
 - Avoid excessive defensive over-engineering where standard repository flow suffices.
 - Keep public APIs backward compatible unless breaking changes are explicitly requested.
-- Do not write or suggest adding unit tests or test cases unless specifically requested.
 
 ## Idioms, Networking & Performance
 
@@ -35,3 +34,23 @@
 - [matterclient](https://github.com/matterbridge/matterclient) is the primary reference implementation, with [matrixclient](https://github.com/matterbridge/matrixclient) and [slackclient](https://github.com/matterbridge/slackclient) as secondary references. `msteamsclient` should mirror `matterclient`'s public API, semantics, logging levels (e.g. `SetLogLevel` / `SetLogAPICalls`, where `"warn"` shows API calls), and naming as closely as possible.
 - Before changing or adding behaviour, check how matterclient does it and follow it unless the Microsoft Teams protocol requires otherwise; document any deliberate difference in a comment.
 - Consumers (e.g. matterircd `bridge/msteams` vs `bridge/mattermost`) should be able to treat both clients the same way, so fix differences here rather than working around them downstream.
+
+## When Reviewing Pull Requests
+
+- Lead with the most critical issue first. Do not bury blockers under minor nits or formatting notes.
+- Distinguish blockers (must fix before merge) from suggestions (nice-to-have / non-blocking).
+- Explain *why* a change is needed, not just *what* to change (e.g., protocol desync, race conditions, goroutine leaks, or memory growth).
+- Reference project conventions from this document and the existing repository rather than invoking personal preferences.
+
+## Review Tone & Feedback Style
+
+- Direct and respectful. Avoid "you should" — prefer objective framing like "this function could", "consider", or "handling this here avoids a race condition".
+- Provide concrete Go code examples in review comments whenever suggesting non-trivial logic, error-handling flows, or synchronization adjustments.
+
+## What to Always Check
+
+- Concurrency & Goroutine Lifecycles: Are mutexes unlocked in all exit paths? Could a channel send or receive block indefinitely on network teardown?
+- Error Handling Completeness: Are network read/write errors, WebSocket disconnects, and API error payloads surfaced and handled without silently dropping state?
+- Memory & Unbounded Growth: Do message caches, backlog queues, user maps, or channel buffers grow unbounded without eviction or size limits?
+- Protocol Fidelity: Do changes adhere to IRC RFCs / Mattermost REST & WebSocket API expectations without breaking existing IRC client parsers?
+- TOCTOU & State Consistency: Is shared state re-checked or held under lock across multi-step API and networking operations?
