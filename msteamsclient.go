@@ -101,9 +101,10 @@ type Client struct {
 	loginCancel context.CancelFunc
 	wg          sync.WaitGroup
 
-	connected      atomic.Bool
-	wsConnected    atomic.Bool
-	lastWsActivity atomic.Int64
+	connected         atomic.Bool
+	wsConnected       atomic.Bool
+	initialSyncLogged atomic.Bool
+	lastWsActivity    atomic.Int64
 
 	// Lock ordering: reauthMu -> authMu. Never hold authMu or Client.RWMutex across I/O.
 	reauthMu    sync.Mutex
@@ -279,8 +280,16 @@ func (c *Client) Login(ctx context.Context) error {
 		return err
 	}
 
+	c.initialSyncLogged.Store(false)
+
 	if me := c.Me(); me != nil {
 		c.CacheUser(me)
+
+		if me.TenantID != "" {
+			c.logger.Infof("found our tenant %s (user: %s)", me.TenantID, me.MRI)
+		} else {
+			c.logger.Infof("found our account %s (id: %s)", c.effectiveAccountType(), me.MRI)
+		}
 	}
 
 	err = c.UpdateChannels(loginCtx)
